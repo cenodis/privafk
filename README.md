@@ -1,4 +1,5 @@
-#Change player privileges even when they are not logged in.
+Change player privileges even when they are not logged in.
+==
 
 This mod allows you create automatic assignments of privileges. Currently privileges are granted or revoked whenever a player logs in.
 
