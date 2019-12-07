@@ -1,24 +1,24 @@
-Change player privileges even when they are not logged in.
+Change privileges for all players.
 ==
 
-This mod allows you create automatic assignments of privileges. Currently privileges are granted or revoked whenever a player logs in.
+This is a mod for the game Minetest. It allows you create automatic assignments of privileges. Currently privileges are granted or revoked whenever a player logs in.
 
 Syntax
 
 ```
-/privafk (grant|revoke|reset|list) <privilege>
+/privall (grant|revoke|reset|list) <privilege> ...
 ```
-`grant <privilege>`
+`grant <privilege> ...`
 
-When a player joins and doesn't have this privilege grant it to them. This also applies the privilege to all logged in players immediately.
+Grant the specified privileges to all online players immediately. If a player does not have this privilege after this call has been made then it will be granted to them the next time they log in.
 
-`revoke <privilege>`:
+`revoke <privilege> ...`:
 
-When a player joins and has this privilege, revoke it. This also revokes the privilege for all logged in players immediately.
+Revoke the specified privileges from all online players immediately. If a player has this privilege after this call has been made then it will be revoked from them the next time they log in.
 
-`reset <privilege>`:
+`reset <privilege> ...`:
 
-Remove the automated assignment for this privilege. This only prevents the further granting/revoking of this privilege. It does not affect already existing privileges.
+Remove the automated assignment for these privileges. This only prevents the further granting/revoking of these privileges. It does not affect already existing ones.
 
 `list`:
 

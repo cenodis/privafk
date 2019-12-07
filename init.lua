@@ -1,11 +1,11 @@
--- privafk/init.lua
+-- privall/init.lua
 
 local storage = minetest.get_mod_storage()
 
-local privafk = minetest.deserialize(storage:get_string("data"))
+local privall = minetest.deserialize(storage:get_string("data"))
 
-if privafk == nil then
-	privafk = {
+if privall == nil then
+	privall = {
 		grant = {},
 		revoke = {}
 	}
@@ -15,106 +15,212 @@ end
 -- Constants
 local green = "#009933"
 local red = "#ff3300"
+
 local plus = minetest.colorize(green, " +")
 local minus = minetest.colorize(red, " -")
+
+local changedPrefix = "[privall] Your privileges have changed:"
 
 
 -- Utility functions
 
-local grantPriv = function(name, priv, noMsg)
-	noMsg = noMsg or false
+local formatOutput = function(prefix, changes)
+	local rope = {prefix}
+	local changed = false
+	
+	for _,priv in ipairs(changes.grant) do
+		table.insert(rope, plus)
+		table.insert(rope, minetest.colorize(green, priv))
+		table.insert(rope, ",")
+		changed = true
+	end
+
+	for _,priv in ipairs(changes.revoke) do
+		table.insert(rope, minus)
+		table.insert(rope, minetest.colorize(red, priv))
+		table.insert(rope, ",")
+		changed = true
+	end
+
+	return table.concat(rope), changed
+end
+
+local save = function()
+	storage:set_string("data", minetest.serialize(privall))
+end
+
+local isTracked = function(priv)
+	return (privall.grant[priv] or privall.revoke[priv])
+end
+
+local grantPriv = function(name, priv, changes)
 	local privs = minetest.get_player_privs(name)
 	if not privs[priv] then
 		privs[priv] = true
 		minetest.set_player_privs(name, privs)
-		if not noMsg then
-			minetest.chat_send_player(name, minetest.colorize(green, "[privafk] You have been granted the privilege \""..priv.."\"."))
-		end
-		minetest.log("action", "[privafk] Granted priv \""..priv.."\" to player \""..name.."\".")
+		table.insert(changes.grant, priv)
+		minetest.log("action", "[privall] Granted priv \""..priv.."\" to player \""..name.."\".")
 		return true
 	end
 	return false
 end
 
-local revokePriv = function(name, priv, noMsg)
-	noMsg = noMsg or false
+local revokePriv = function(name, priv, changes)
 	local privs = minetest.get_player_privs(name)
 	if privs[priv] then
 		privs[priv] = nil
 		minetest.set_player_privs(name, privs)
-		if not noMsg then
-			minetest.chat_send_player(name, minetest.colorize(red, "[privafk] You have lost the privilege \""..priv.."\"."))
-		end
-		minetest.log("action", "[privafk] Revoked priv \""..priv.."\" from player \""..name.."\".")
+		table.insert(changes.revoke, priv)
+		minetest.log("action", "[privall] Revoked priv \""..priv.."\" from player \""..name.."\".")
 		return true
 	end
 	return false
 end
 
-local save = function()
-	storage:set_string("data", minetest.serialize(privafk))
+local grantAll = function(privs)
+	for _,player in ipairs(minetest.get_connected_players()) do
+		local name = player:get_player_name()
+		local changes = {grant = {}, revoke = {}}
+		local changed = false
+		for _,priv in ipairs(privs) do
+			if grantPriv(name, priv, changes) then
+				changed = true
+			end
+		end
+		if changed then
+			local text = formatOutput(changedPrefix, changes)
+			minetest.chat_send_player(name, text)
+		end
+	end
+end
+
+local revokeAll = function(privs)
+	for _,player in ipairs(minetest.get_connected_players()) do
+		local name = player:get_player_name()
+		local changes = {grant = {}, revoke = {}}
+		local changed = false
+		for _,priv in ipairs(privs) do
+			if revokePriv(name, priv, changes) then
+				changed = true
+			end
+		end
+		if changed then
+			local text = formatOutput(changedPrefix, changes)
+			minetest.chat_send_player(name, text)
+		end
+	end
 end
 
 
--- Chat commands
+-- Subcommands
 
 local commands = {
-	grant = function(priv)
-		if privafk.grant[priv] then
-			return "\""..priv.."\" is already auto granted."
-		end
-		if privafk.revoke[priv] then
-			privafk.revoke[priv] = nil
-		end
-		privafk.grant[priv] = true
-		for _,player in ipairs(minetest.get_connected_players()) do
-			grantPriv(player:get_player_name(), priv)
-		end
-		minetest.log("action", "[privafk] Privilege \""..priv.."\" will now be granted to all players.")
-		return "\""..priv.."\" will now be granted to all players."
-	end,
+	grant = {
+		run = function(name, tokens)
+			for _,priv in ipairs(tokens) do
+				privall.revoke[priv] = nil
+				privall.grant[priv] = true
+				minetest.log("action", "[privall] Privilege \""..priv.."\" is now being granted to all players.")
+			end
+			grantAll(tokens)
+			save()
+			return true, "[privall] Privileges\""..table.concat(tokens, ", ").."\" are now being granted to all players."
+		end,
 
-	revoke = function(priv)
-		if privafk.revoke[priv] then
-			return "\""..priv.."\" is already auto revoked."
-		end
-		if privafk.grant[priv] then
-			privafk.grant[priv] = nil
-		end
-		privafk.revoke[priv] = true
-		for _,player in ipairs(minetest.get_connected_players()) do
-			revokePriv(player:get_player_name(), priv)
-		end
-		minetest.log("action", "[privafk] Privilege \""..priv.."\" will now be revoked from all players.")
-		return "\""..priv.."\" will now be revoked for all players."
-	end,
+		checkParams = function(tokens)
+			if #tokens == 0 then
+				return false, "[privall] Subcommand \"grant\" requires at least 1 argument."
+			end
+			for _,priv in ipairs(tokens) do
+				if not minetest.registered_privileges[priv] then
+					return false, "[privall] Unknown privilege \""..priv.."\"."
+				end
+				if privall.grant[priv] then
+					return false, "[privall] Privilege \""..priv.."\" is already being granted to all players."
+				end
+			end
+			return true
+		end,
+	},
+	
+	revoke = {
+		run = function(name, tokens)
+			for _,priv in ipairs(tokens) do
+				privall.grant[priv] = nil
+				privall.revoke[priv] = true
+				minetest.log("action", "[privall] Privilege \""..priv.."\" is now being revoked from all players.")
+			end
+			revokeAll(tokens)
+			save()
+			return true, "[privall] Privileges \""..table.concat(tokens, ", ").."\" are now being revoked from all players."
+		end,
 
-	reset = function(priv)
-		privafk.grant[priv] = nil
-		privafk.revoke[priv] = nil
-		minetest.log("action", "[privafk] Cleared assignment for privilege \""..priv.."\".")
-		return "Removed auto assignment of \""..priv.."\"."
-	end,
+		checkParams = function(tokens)
+			if #tokens == 0 then
+				return false, "[privall] Subcommand \"revoke\" requires at least 1 argument."
+			end
+			for _,priv in ipairs(tokens) do
+				if privall.revoke[priv] then
+					return false, "[privall] Privilege \""..priv.." is already being revoked from all players."
+				end
+			end
+			return true
+		end,
+	},
 
-	list = function()
-		local rope = {"Current privafk configuration: "}
-		-- Grant
-		for priv,_ in pairs(privafk.grant) do
-			table.insert(rope, " +")
-			table.insert(rope, priv)
-			table.insert(rope, ",")
-		end
+	reset = {
+		run = function(name, tokens)
+			for _,priv in ipairs(tokens) do
+				privall.grant[priv] = nil
+				privall.revoke[priv] = nil
+				minetest.log("action", "[privall] Cleared assignment for privilege \""..priv.."\".")
+			end
+			save()
+			return true, "[privall] Cleared assignments for privileges \""..table.concat(tokens, ", ").."\"."
+		end,
 
-		for priv,_ in pairs(privafk.revoke) do
-			table.insert(rope, " -")
-			table.insert(rope, priv)
-			table.insert(rope, ",")
-		end
-		if(#rope == 1) then
-			table.insert(rope, "None")
-		end
-		return table.concat(rope)
-	end,
+		checkParams = function(tokens)
+			if #tokens == 0 then
+				return false, "[privall] Subcommand \"reset\" requires at least 1 argument."
+			end
+			for _,priv in ipairs(tokens) do
+				if not isTracked(priv) then
+					return false, "[privall] Privilege \""..priv.."\" is not currently tracked by privall."
+				end
+			end
+			return true
+		end,
+	},
+
+	list = {
+		run = function(name, tokens)
+			local rope = {"Current privall configuration: "}
+
+			for priv,_ in pairs(privall.grant) do
+				table.insert(rope, " +")
+				table.insert(rope, priv)
+				table.insert(rope, ",")
+			end
+
+			for priv,_ in pairs(privall.revoke) do
+				table.insert(rope, " -")
+				table.insert(rope, priv)
+				table.insert(rope, ",")
+			end
+			if(#rope == 1) then
+				table.insert(rope, "None")
+			end
+			
+			minetest.chat_send_player(name, table.concat(rope))
+		end,
+
+		checkParams = function(tokens)
+			if #tokens ~= 0 then
+				return false, "[privall] Subcommand \"list\" takes no arguments."
+			end
+			return true
+		end,
+	},
 }
 
 
@@ -122,57 +228,51 @@ local commands = {
 
 minetest.register_on_shutdown(save)
 
-minetest.register_chatcommand("privafk", {
-	params = "(grant|revoke|reset|list) <privilege>",
-	description = "Setup or remove an automated grant/revoke of player privileges.",
+minetest.register_chatcommand("privall", {
+	params = "(grant|revoke|reset|list) <privilege> ...",
+	description = "Edit or list the automated granting/revoking of privileges.",
 	privs = {privs = true},
 	func = function(name, param)
-		local tokens = {}		
+		-- Split params at spaces
+		local tokens = {}
 		for token in param:gmatch("[^ ]+") do
 			table.insert(tokens, token)
 		end
-		local mode = tokens[1] or ""
-		local priv = tokens[2] or ""
+		
+		-- Sanitize input
+		if #tokens == 0 then
+			return false, "[privall] Please specify a subcommand. See \"/help privall\" for more details."
+		end
+		local mode = table.remove(tokens, 1)
 		if commands[mode] == nil then
-			return false, "Subcommand \"" ..mode.. "\" does not exists."	
+			return false, "[privall] Unknown subcommand \""..mode.."\"."
 		end
-		if (mode ~= "list") and not core.registered_privileges[priv] then
-			if(priv == "") then
-				return false, "Missing argument."
-			end
-			return false, "Unknown privilege \""..priv.."\"."
+
+		-- Check subcommand parameters
+		local result, msg = commands[mode].checkParams(tokens)
+		if not result then
+			return false, msg
 		end
-		local result = commands[mode](priv)
-		save()
-		return true, result
+
+		return commands[mode].run(name, tokens)
 	end,
 })
 
 minetest.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
-	local rope = {"[privafk] Your privileges have changed:"}
-	local changed = false
+	local changes = {grant = {}, revoke = {}}
 
-	-- Grant privs
-	for priv,_ in pairs(privafk.grant) do
-		if grantPriv(name, priv, true) then
-			table.insert(rope, plus)
-			table.insert(rope, minetest.colorize(green, priv))
-			changed = true
-		end
+	for priv,_ in pairs(privall.grant) do
+		grantPriv(name, priv, changes)
 	end
 
-	-- Revoke privs
-	for priv,_ in pairs(privafk.revoke) do
-		if revokePriv(name, priv, true) then
-			table.insert(rope, minus)
-			table.insert(rope, minetest.colorize(red, priv))
-			changed = true
-		end
+	for priv,_ in pairs(privall.revoke) do
+		revokePriv(name, priv, changes)
 	end
+
+	local text, changed = formatOutput(changedPrefix, changes)
 
 	if changed then
-		rope = table.concat(rope)
-		minetest.chat_send_player(name, rope)
+		minetest.chat_send_player(name, text)
 	end
 end)
